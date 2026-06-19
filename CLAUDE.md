@@ -6,7 +6,7 @@ This file is for AI assistants (Claude, Cursor, Copilot, Gemini, etc.). Read thi
 
 ## What this app is
 
-A family prediction pool app for tournaments (currently World Cup 2026). Players predict match scores before kickoff. Lower total score difference = better. The name is ironic — points are bad here.
+A family prediction pool app for tournaments (currently World Cup). Players predict match scores before kickoff. Lower total score difference = better. The name is ironic — points are bad here.
 
 No build step. No framework. Vanilla JS ES modules served by a static file server. Firebase Realtime Database is optional — the app works fully offline/locally without it.
 
@@ -79,30 +79,35 @@ The project uses ES modules throughout. Changing this to `"commonjs"` breaks Pla
 ## Tests — what you need to know
 
 ### Time is frozen in browser tests
+
 Prediction inputs lock at each match's real kickoff time. Tests that touch inputs use a frozen `Date.now()` via Playwright fixtures. Without this, tests break silently as real matches kick off.
 
 Import from `./fixtures.js`, not `@playwright/test`:
+
 ```js
 import { test, expect } from "./fixtures.js";
 ```
 
 ### Three fixtures
 
-| Fixture | When to use |
-|---|---|
-| `frozenPage` | Any UI test that touches prediction inputs or lock state |
-| `predPage` | Tests that go straight to filling in scores (tab + player + edit already set up) |
-| `frozenBrowser` | Sync tests — set up `page.route()` mocks BEFORE calling `page.goto()` |
+| Fixture         | When to use                                                                      |
+| --------------- | -------------------------------------------------------------------------------- |
+| `frozenPage`    | Any UI test that touches prediction inputs or lock state                         |
+| `predPage`      | Tests that go straight to filling in scores (tab + player + edit already set up) |
+| `frozenBrowser` | Sync tests — set up `page.route()` mocks BEFORE calling `page.goto()`            |
 
 ### Firebase is always mocked in tests
+
 Never use a real Firebase project in tests. Use `page.route(POOL_URL, ...)` to intercept fetch calls. See `tests/sync.spec.js` for the standard `mockFirebase` helper pattern.
 
 ### Test layers
+
 - **scoring.spec.js** — pure logic, no browser, ~1s. Put calculation tests here.
 - **app.spec.js** — UI flows, ~10s. Put "clicking X does Y" tests here.
 - **sync.spec.js** — Firebase behaviour, ~11s. Put save/load/error tests here.
 
 ### Test conventions
+
 - Test behaviours, not data. Don't hardcode match counts or team names.
 - `expect(count).toBeGreaterThan(0)` over `expect(count).toBe(15)`.
 - Register `page.route()` before `page.goto()` in sync tests.
@@ -115,6 +120,7 @@ Never use a real Firebase project in tests. Use `page.route(POOL_URL, ...)` to i
 Any variables referenced inside the freeze function must be literals — module-scope variables won't exist in the browser context. The date string `"2020-01-01T00:00:00Z"` must be a literal inside `freezeTime`, not a constant defined above it.
 
 **`pullRemote` vs `connectPool` are different flows.**
+
 - `connectPool` = user clicks Connect button → GET then PUT if null (creates new pool)
 - `pullRemote` = hash-based auto-load on page open, or Refresh button → GET only
 
