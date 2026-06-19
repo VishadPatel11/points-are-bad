@@ -200,8 +200,53 @@ This bug had no visible error in the console during normal use because the catch
 
 ## Adding new tests
 
-1. Pick the right file — scoring logic → `scoring.spec.js`, UI flow → `app.spec.js`, Firebase → `sync.spec.js`
+1. Pick the right file — scoring logic → `scoring.spec.js`, UI flow → `app.spec.js`, Firebase → `sync.spec.js`, ESPN fetch → `fetch.spec.js`
 2. Use `frozenPage` or `predPage` if your test touches prediction inputs
 3. Use `frozenBrowser` + `page.route()` if your test involves Firebase calls
-4. Keep assertions behaviour-focused — what the user sees, not what the data is
-5. Run the full suite before opening a PR: `npm test`
+4. Use real (unfrozen) time for fetch tests — `autoFetchResults` returns early when no matches have started
+5. Keep assertions behaviour-focused — what the user sees, not what the data is
+6. Run the full suite before opening a PR: `npm test`
+
+---
+
+## Coverage record
+
+> Last updated: June 2026 — 113 tests across 4 files.
+
+This section records the known coverage state and the gaps that are acceptable. When you add a significant feature or fix a bug, update this section. The goal is never to drop below the levels recorded here.
+
+### scoring.js — ~95%
+Every exported function has dedicated tests: `matchPoints`, `isCounted`, `leaderboard`, `clampScore`, `isLocked`, `num`, `hasFullEntries`, `getOfficialIds`, `playedMatches`, `countedMatches`.
+
+**Known gap:** `hasFullPred` is exercised through `isCounted` tests but has no test of its own.
+
+### sync.js — ~85%
+`connectPool`, `pullRemote`, `queueSave`, and `setDot` are all covered including error paths and the empty-players bug.
+
+**Known gap:** `dbFromHash` URL parsing/validation logic (invalid URLs, missing hash, malformed encoding) has no unit tests.
+
+### state.js — ~80%
+`sanitizeState` and `mergeRemote` are exercised through sync tests.
+
+**Known gap:** The `sanitizeState` deduplication-by-name logic (two players share a name — keep the one with more predictions) is never directly tested. The `mergeRemote` case where a local player matches remote by name rather than ID is also untested.
+
+### render.js — ~75%
+All four view functions (`viewBoard`, `viewPred`, `viewRes`, `viewRules`) and `renderBanner` are covered, including breakdown table, not-counted note, lock badges, live badges, and admin panel.
+
+**Known gap:** The `viewBoard` error-catch path (renders "Board error: …") is never triggered in tests.
+
+### events.js — ~70%
+Most click handlers are exercised through app and sync tests.
+
+**Known gaps:**
+- `copyBtn` clipboard write is not tested (browser clipboard API behaves differently in Playwright's default context)
+- The `focusout` re-render (`setTimeout(render, 100)`) is not directly asserted
+- `schedulePartialSave` debounce timing is not explicitly tested
+
+### fetch.js — ~80%
+Final scores written to state, Live/Halftime badges, ESPN error handling, year filter, unknown team skip, team name normalisation (`United States` → `usa`), and early return when no matches have started are all covered.
+
+**Known gap:** The `Côte d'Ivoire` → `ivory coast` normalisation variant is not tested (only the `United States` → `usa` path is).
+
+### Minimum standard
+Before merging any PR, the suite must still pass at **113 tests or more**. If you remove a test, you must have a documented reason. If you add a feature, you must add at least one test for its core behaviour.
