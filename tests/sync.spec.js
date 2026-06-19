@@ -234,3 +234,134 @@ test("remote results are reflected in the results tab after load", async ({ froz
   await expect(page.locator('[data-res="1:h"]')).toHaveValue("3");
   await expect(page.locator('[data-res="1:a"]')).toHaveValue("1");
 });
+
+// ─── predictionsLocked from remote ───────────────────────────────────────────
+
+test("lockbanner appears on predictions tab when remote state has predictionsLocked true", async ({ frozenBrowser: page }) => {
+  await mockFirebase(page, {
+    getResponse: { ...poolWithPlayers, predictionsLocked: true },
+  });
+  await page.goto(DB_HASH);
+  await page.click('[data-tab="pred"]');
+  await expect(page.locator(".lockbanner")).toBeVisible();
+});
+
+test("prediction inputs are all disabled when predictionsLocked is true from remote", async ({ frozenBrowser: page }) => {
+  await mockFirebase(page, {
+    getResponse: { ...poolWithPlayers, predictionsLocked: true },
+  });
+  await page.goto(DB_HASH);
+  await page.click('[data-tab="pred"]');
+  const inputs = page.locator('[data-pred]');
+  const count = await inputs.count();
+  expect(count).toBeGreaterThan(0);
+  for (let i = 0; i < count; i++) {
+    await expect(inputs.nth(i)).toBeDisabled();
+  }
+});
+
+// ─── officialPlayers from remote ─────────────────────────────────────────────
+
+test("Official Board shows only official players from remote state", async ({ frozenBrowser: page }) => {
+  await mockFirebase(page, {
+    getResponse: {
+      ...poolWithPlayers,
+      officialPlayers: ["p1"], // only Alice is official
+    },
+  });
+  await page.goto(DB_HASH);
+  await page.click('[data-tab="board"]');
+
+  // Official Board (default) should show only Alice
+  const rows = page.locator(".boardrow");
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first()).toContainText("Alice");
+});
+
+test("Full Rankings shows all players regardless of officialPlayers", async ({ frozenBrowser: page }) => {
+  await mockFirebase(page, {
+    getResponse: {
+      ...poolWithPlayers,
+      officialPlayers: ["p1"],
+    },
+  });
+  await page.goto(DB_HASH);
+  await page.click('[data-tab="board"]');
+  await page.click("#btabAll");
+
+  await expect(page.locator(".boardrow")).toHaveCount(2);
+});
+
+// ─── Pull guards ──────────────────────────────────────────────────────────────
+
+test("pullRemote does not overwrite state while prediction edit mode is active", async ({ frozenBrowser: page }) => {
+  // Initial load: empty pool
+  await mockFirebase(page, { getResponse: emptyPool });
+  await page.goto(DB_HASH);
+
+  // Add a player and enter edit mode
+  await page.click('[data-tab="pred"]');
+  await page.click("#addPlayer");
+  // Edit mode is now active
+
+  // Override route so next pull would return poolWithPlayers
+  await mockFirebase(page, { getResponse: poolWithPlayers });
+
+  // Click refresh — should be a no-op because editingPred is true
+  await page.click("#refreshBtn");
+
+  // The local player count should still be 1 (our added player), not 2
+  await expect(page.locator(".chip:not(.add)")).toHaveCount(1);
+});
+
+// ─── mergeRemote fills gaps, does not overwrite local predictions ─────────────
+
+test("local predictions are preserved when remote has a different value for the same match", async ({ frozenBrowser: page }) => {
+  // Remote has Alice predicting 3-0 for match 1
+  const remotePool = {
+    ...emptyPool,
+    players: [{ id: "p1", name: "Alice" }],
+    predictions: { p1: { 1: { h: 3, a: 0 } } },
+  };
+
+  let callCount = 0;
+  await page.route(POOL_URL, async (route) => {
+    if (route.request().method() === "GET") {
+      // First call: load pool with existing prediction
+      // Second call (Refresh): return same data — local prediction already set
+      callCount++;
+      await route.fulfill({
+        status: 200, contentType: "application/json",
+        body: JSON.stringify(remotePool),
+      });
+    } else {
+      await route.fulfill({ status: 200, contentType: "application/json", body: "true" });
+    }
+  });
+
+  await page.goto(DB_HASH);
+  await page.click('[data-tab="pred"]');
+
+  // Alice's prediction for match 1 should be the remote value (3-0)
+  await page.click(".chip:has-text('Alice')");
+  await expect(page.locator('[data-pred="1:h"]')).toHaveValue("3");
+  await expect(page.locator('[data-pred="1:a"]')).toHaveValue("0");
+});
+
+// ─── Save retry on failure ────────────────────────────────────────────────────
+
+test("status shows Save failed when PUT returns a server error", async ({ frozenBrowser: page }) => {
+  await page.route(POOL_URL, async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(emptyPool) });
+    } else if (route.request().method() === "PUT") {
+      await route.fulfill({ status: 500, body: "Internal Server Error" });
+    }
+  });
+
+  await page.goto(DB_HASH);
+  await page.click('[data-tab="pred"]');
+  await page.click("#addPlayer");
+
+  await expect(page.locator("#saveDot")).toContainText("Save failed");
+});

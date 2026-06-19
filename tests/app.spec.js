@@ -361,3 +361,205 @@ test("switching to Full Rankings changes the active tab", async ({ frozenPage: p
   await expect(page.locator("#btabAll")).toHaveClass(/on/);
   await expect(page.locator("#btabOfficial")).not.toHaveClass(/on/);
 });
+
+// ─── Leaderboard breakdown table ─────────────────────────────────────────────
+
+test("leaderboard shows per-match breakdown table after results are entered", async ({ frozenPage: page }) => {
+  await page.click('[data-tab="pred"]');
+  await page.click("#addPlayer");
+
+  // Fill all predictions
+  const inputs = page.locator('[data-pred]');
+  const count = await inputs.count();
+  for (let i = 0; i < count; i++) await inputs.nth(i).fill("1");
+  await page.click("#togglePredEdit");
+
+  // Enter a result for the first match
+  await page.click('[data-tab="res"]');
+  await page.click("#toggleResEdit");
+  await page.locator('[data-res]').nth(0).fill("1");
+  await page.locator('[data-res]').nth(1).fill("0");
+  await page.click("#toggleResEdit");
+
+  await page.click('[data-tab="board"]');
+  await expect(page.locator("table.break")).toBeVisible();
+  await expect(page.locator("table.break tbody tr").first()).toBeVisible();
+});
+
+test("leaderboard shows 'not counted' warning when a played match was not predicted by everyone", async ({ frozenPage: page }) => {
+  // Add Alice — predict everything
+  await page.click('[data-tab="pred"]');
+  await page.click("#addPlayer");
+  await page.fill("#renameInput", "Alice");
+  const inputs = page.locator('[data-pred]');
+  const count = await inputs.count();
+  for (let i = 0; i < count; i++) await inputs.nth(i).fill("1");
+  await page.click("#togglePredEdit");
+
+  // Add Bob — leave all predictions blank
+  await page.click("#addPlayer");
+  await page.fill("#renameInput", "Bob");
+  await page.click("#togglePredEdit");
+
+  // Enter a result
+  await page.click('[data-tab="res"]');
+  await page.click("#toggleResEdit");
+  await page.locator('[data-res]').nth(0).fill("2");
+  await page.locator('[data-res]').nth(1).fill("1");
+  await page.click("#toggleResEdit");
+
+  await page.click('[data-tab="board"]');
+  await expect(page.locator("#view")).toContainText("excluded");
+});
+
+// ─── clampScore enforced in the UI ───────────────────────────────────────────
+
+test("entering a value above 20 in a prediction input clamps to 20", async ({ predPage: page }) => {
+  const input = page.locator('[data-pred]').nth(0);
+  await input.fill("25");
+  await input.blur();
+  // After blur the app re-renders with the clamped value
+  await expect(page.locator('[data-pred]').nth(0)).toHaveValue("20");
+});
+
+test("entering a negative value in a prediction input clamps to 0", async ({ predPage: page }) => {
+  const input = page.locator('[data-pred]').nth(0);
+  await input.fill("-3");
+  await input.blur();
+  await expect(page.locator('[data-pred]').nth(0)).toHaveValue("0");
+});
+
+// ─── predictionsLocked via global admin lock ──────────────────────────────────
+
+test("lockbanner appears and inputs are disabled when predictionsLocked is true in loaded state", async ({ frozenBrowser: page }) => {
+  const { POOL_URL, DB_HASH } = await import("./fixtures.js");
+  await page.route(POOL_URL, async (route) => {
+    await route.fulfill({
+      status: 200, contentType: "application/json",
+      body: JSON.stringify({
+        players: [{ id: "p1", name: "Alice" }],
+        predictions: {},
+        results: {},
+        predictionsLocked: true,
+        officialPlayers: null,
+      }),
+    });
+  });
+  await page.goto(DB_HASH);
+  await page.click('[data-tab="pred"]');
+  await expect(page.locator(".lockbanner")).toBeVisible();
+  await expect(page.locator('[data-pred]').first()).toBeDisabled();
+});
+
+// ─── Admin panel controls ─────────────────────────────────────────────────────
+
+test("admin panel Auto button sets officialPlayers to auto-derive mode", async ({ frozenBrowser: page }) => {
+  const { POOL_URL, DB_HASH } = await import("./fixtures.js");
+  let savedBody = null;
+  await page.route(POOL_URL, async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({
+        status: 200, contentType: "application/json",
+        body: JSON.stringify({
+          players: [{ id: "p1", name: "Alice" }],
+          predictions: {},
+          results: {},
+          predictionsLocked: false,
+          officialPlayers: ["p1"],
+        }),
+      });
+    } else if (route.request().method() === "PUT") {
+      savedBody = JSON.parse(route.request().postData());
+      await route.fulfill({ status: 200, contentType: "application/json", body: "true" });
+    }
+  });
+  await page.goto(DB_HASH);
+  // Open admin panel
+  await page.click("details.adminpanel summary");
+  await page.click("#autoOfficialBtn");
+  await page.waitForResponse((r) => r.url() === POOL_URL && r.request().method() === "PUT");
+  expect(savedBody.officialPlayers).toBeNull();
+});
+
+test("admin panel Select All sets all players as official", async ({ frozenBrowser: page }) => {
+  const { POOL_URL, DB_HASH } = await import("./fixtures.js");
+  let savedBody = null;
+  await page.route(POOL_URL, async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({
+        status: 200, contentType: "application/json",
+        body: JSON.stringify({
+          players: [{ id: "p1", name: "Alice" }, { id: "p2", name: "Bob" }],
+          predictions: {},
+          results: {},
+          predictionsLocked: false,
+          officialPlayers: [],
+        }),
+      });
+    } else if (route.request().method() === "PUT") {
+      savedBody = JSON.parse(route.request().postData());
+      await route.fulfill({ status: 200, contentType: "application/json", body: "true" });
+    }
+  });
+  await page.goto(DB_HASH);
+  await page.click("details.adminpanel summary");
+  await page.click("#allOfficialBtn");
+  await page.waitForResponse((r) => r.url() === POOL_URL && r.request().method() === "PUT");
+  expect(savedBody.officialPlayers).toEqual(expect.arrayContaining(["p1", "p2"]));
+});
+
+test("admin panel Clear All sets officialPlayers to empty", async ({ frozenBrowser: page }) => {
+  const { POOL_URL, DB_HASH } = await import("./fixtures.js");
+  let savedBody = null;
+  await page.route(POOL_URL, async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({
+        status: 200, contentType: "application/json",
+        body: JSON.stringify({
+          players: [{ id: "p1", name: "Alice" }],
+          predictions: {},
+          results: {},
+          predictionsLocked: false,
+          officialPlayers: ["p1"],
+        }),
+      });
+    } else if (route.request().method() === "PUT") {
+      savedBody = JSON.parse(route.request().postData());
+      await route.fulfill({ status: 200, contentType: "application/json", body: "true" });
+    }
+  });
+  await page.goto(DB_HASH);
+  await page.click("details.adminpanel summary");
+  await page.click("#noneOfficialBtn");
+  await page.waitForResponse((r) => r.url() === POOL_URL && r.request().method() === "PUT");
+  expect(savedBody.officialPlayers).toEqual([]);
+});
+
+test("individual player checkbox in admin panel toggles official status", async ({ frozenBrowser: page }) => {
+  const { POOL_URL, DB_HASH } = await import("./fixtures.js");
+  let savedBody = null;
+  await page.route(POOL_URL, async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({
+        status: 200, contentType: "application/json",
+        body: JSON.stringify({
+          players: [{ id: "p1", name: "Alice" }, { id: "p2", name: "Bob" }],
+          predictions: {},
+          results: {},
+          predictionsLocked: false,
+          officialPlayers: ["p1", "p2"],
+        }),
+      });
+    } else if (route.request().method() === "PUT") {
+      savedBody = JSON.parse(route.request().postData());
+      await route.fulfill({ status: 200, contentType: "application/json", body: "true" });
+    }
+  });
+  await page.goto(DB_HASH);
+  await page.click("details.adminpanel summary");
+  // Uncheck Bob
+  await page.locator('[data-offpid="p2"]').uncheck();
+  await page.waitForResponse((r) => r.url() === POOL_URL && r.request().method() === "PUT");
+  expect(savedBody.officialPlayers).not.toContain("p2");
+  expect(savedBody.officialPlayers).toContain("p1");
+});

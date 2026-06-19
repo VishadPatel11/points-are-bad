@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
-import { matchPoints, hasFullPred, isCounted, leaderboard, playedMatches, countedMatches } from "../js/scoring.js";
+import { matchPoints, hasFullPred, isCounted, leaderboard, playedMatches, countedMatches, clampScore, isLocked, num, hasFullEntries, getOfficialIds } from "../js/scoring.js";
 import { state } from "../js/state.js";
-import { SEED_STATE } from "../js/data.js";
+import { SEED_STATE, MATCHES } from "../js/data.js";
 
 // Reset state to a clean slate before every test.
 // We mutate the same object reference (not reassign) so scoring.js keeps seeing it.
@@ -212,4 +212,115 @@ test("leaderboard counts perfects correctly across multiple matches", () => {
   const { rows } = leaderboard();
   expect(rows[0].perfects).toBe(2);
   expect(rows[0].total).toBe(3); // |0-1| + |3-1| = 3
+});
+
+// ─── num ─────────────────────────────────────────────────────────────────────
+
+test("num returns null for null", () => { expect(num(null)).toBeNull(); });
+test("num returns null for undefined", () => { expect(num(undefined)).toBeNull(); });
+test("num returns the value for 0", () => { expect(num(0)).toBe(0); });
+test("num returns the value for a positive integer", () => { expect(num(3)).toBe(3); });
+
+// ─── clampScore ───────────────────────────────────────────────────────────────
+
+test("clampScore returns null for empty string", () => {
+  expect(clampScore("")).toBeNull();
+});
+
+test("clampScore returns null for null", () => {
+  expect(clampScore(null)).toBeNull();
+});
+
+test("clampScore returns null for a non-numeric string", () => {
+  expect(clampScore("abc")).toBeNull();
+});
+
+test("clampScore returns 0 for a negative number", () => {
+  expect(clampScore("-5")).toBe(0);
+});
+
+test("clampScore returns 20 for a number above 20", () => {
+  expect(clampScore("25")).toBe(20);
+});
+
+test("clampScore returns 20 for exactly 20", () => {
+  expect(clampScore("20")).toBe(20);
+});
+
+test("clampScore returns 0 for exactly 0", () => {
+  expect(clampScore("0")).toBe(0);
+});
+
+test("clampScore returns the value for a valid mid-range number", () => {
+  expect(clampScore("7")).toBe(7);
+});
+
+// ─── isLocked ─────────────────────────────────────────────────────────────────
+
+test("isLocked returns true for a match in the past", () => {
+  const m = { kickoff: "2020-01-01T00:00:00Z" };
+  expect(isLocked(m)).toBe(true);
+});
+
+test("isLocked returns false for a match far in the future", () => {
+  const m = { kickoff: "2099-01-01T00:00:00Z" };
+  expect(isLocked(m)).toBe(false);
+});
+
+// ─── hasFullEntries ───────────────────────────────────────────────────────────
+
+test("hasFullEntries returns false when player has no predictions", () => {
+  state.players = [{ id: "p1", name: "Alice" }];
+  state.predictions = {};
+  expect(hasFullEntries("p1")).toBe(false);
+});
+
+test("hasFullEntries returns false when player is missing a match", () => {
+  state.players = [{ id: "p1", name: "Alice" }];
+  // Only predict the first match, leave the rest blank
+  state.predictions = { p1: { 1: { h: 1, a: 0 } } };
+  expect(hasFullEntries("p1")).toBe(false);
+});
+
+test("hasFullEntries returns true when all matches are predicted", () => {
+  state.players = [{ id: "p1", name: "Alice" }];
+  const fullPreds = {};
+  MATCHES.forEach(m => { fullPreds[m.n] = { h: 1, a: 0 }; });
+  state.predictions = { p1: fullPreds };
+  expect(hasFullEntries("p1")).toBe(true);
+});
+
+test("hasFullEntries returns false when a prediction has null values", () => {
+  state.players = [{ id: "p1", name: "Alice" }];
+  const preds = {};
+  MATCHES.forEach(m => { preds[m.n] = { h: 1, a: 0 }; });
+  preds[MATCHES[0].n] = { h: null, a: 0 }; // partial
+  state.predictions = { p1: preds };
+  expect(hasFullEntries("p1")).toBe(false);
+});
+
+// ─── getOfficialIds ───────────────────────────────────────────────────────────
+
+test("getOfficialIds returns the explicit list when officialPlayers is set", () => {
+  state.players = [{ id: "p1", name: "Alice" }, { id: "p2", name: "Bob" }];
+  state.officialPlayers = ["p1"];
+  expect(getOfficialIds()).toEqual(["p1"]);
+});
+
+test("getOfficialIds auto-derives from hasFullEntries when officialPlayers is null", () => {
+  state.players = [{ id: "p1", name: "Alice" }, { id: "p2", name: "Bob" }];
+  state.officialPlayers = null;
+  // Only p1 has full entries
+  const fullPreds = {};
+  MATCHES.forEach(m => { fullPreds[m.n] = { h: 1, a: 0 }; });
+  state.predictions = { p1: fullPreds, p2: { 1: { h: 0, a: 0 } } };
+  const ids = getOfficialIds();
+  expect(ids).toContain("p1");
+  expect(ids).not.toContain("p2");
+});
+
+test("getOfficialIds returns empty array when officialPlayers is explicitly empty", () => {
+  state.players = [{ id: "p1", name: "Alice" }];
+  state.officialPlayers = [];
+  expect(getOfficialIds()).toEqual([]);
 });
