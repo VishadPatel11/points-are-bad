@@ -132,6 +132,20 @@ When a player is deleted locally and a remote pull happens before the save compl
 
 ---
 
+## Minimum test standard
+
+**The suite must never drop below 113 tests.** This is the floor set when full coverage was last audited (June 2026).
+
+Rules:
+- Every new feature must include at least one test for its core behaviour before the PR merges
+- If you remove a test, you must have a documented reason in the PR
+- If you add a file with logic, add a corresponding test section
+- Run `npm test` before considering any task done — a passing suite is the definition of "done"
+
+The full coverage record (per-file estimates and known acceptable gaps) lives in [tests/README.md](tests/README.md). Read it before adding tests so you don't duplicate work or miss a known gap.
+
+---
+
 ## CI
 
 GitHub Actions runs all tests on every push/PR to `main`. See [.github/workflows/ci.yml](.github/workflows/ci.yml). If CI is red, run `npm test` locally first — Playwright uploads a report artifact on failure.
